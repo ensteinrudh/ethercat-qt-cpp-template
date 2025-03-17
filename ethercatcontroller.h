@@ -17,6 +17,8 @@ class EtherCatController : public QObject {
   Q_PROPERTY(
       QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
   Q_PROPERTY(bool connected READ isConnected NOTIFY connectedChanged)
+  Q_PROPERTY(
+      bool readyForCommand READ isReadyForCommand NOTIFY readyForCommandChanged)
 
 public:
   explicit EtherCatController(QObject *parent = nullptr);
@@ -37,6 +39,7 @@ signals:
   void statusWordChanged(QString statusWord);
   void statusMessageChanged(QString status);
   void connectedChanged(bool connected);
+  void readyForCommandChanged(bool ready);
 
 private:
   // EtherCAT components
@@ -66,7 +69,8 @@ private:
   QString m_statusMessage;
   bool m_connected;
   int m_cycleCount;
-  std::atomic<bool> m_newCommand;
+  std::atomic<bool> m_commandPending;
+  std::atomic<bool> m_motionInProgress;
   int m_targetPosition;
   int m_targetVelocity;
 
@@ -74,6 +78,7 @@ private:
   void setStatusMessage(const QString &msg);
   void cleanup();
   int configPDOs();
+  bool isReadyForCommand() const { return m_connected && !m_motionInProgress; }
 
   // Real-time thread methods
   void rtThreadFunc();

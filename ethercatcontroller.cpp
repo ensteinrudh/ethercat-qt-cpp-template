@@ -19,8 +19,8 @@ EtherCatController::EtherCatController(QObject *parent)
     : QObject(parent), master(nullptr), domain(nullptr), slave_config(nullptr),
       domain_pd(nullptr), running(false), m_actualPosition(0),
       m_statusWord("0x0000"), m_statusMessage("Not initialized"),
-      m_connected(false), m_cycleCount(0), m_newCommand(false),
-      m_targetPosition(0), m_targetVelocity(0) {}
+      m_connected(false), m_cycleCount(0), m_commandPending(false),
+      m_motionInProgress(false), m_targetPosition(0), m_targetVelocity(0) {}
 
 EtherCatController::~EtherCatController() { shutdown(); }
 
@@ -113,15 +113,28 @@ void EtherCatController::moveToPosition(int position, int velocity) {
     return;
   }
 
+  if (m_motionInProgress) {
+    setStatusMessage("Motion in progress, wait for target reached before "
+                     "sending new command");
+    return;
+  }
+
   // Update target values (thread-safe)
   QMutexLocker locker(&data_mutex);
   m_targetPosition = position;
   m_targetVelocity = velocity;
-  m_newCommand = true;
+  m_commandPending = true;
 
-  setStatusMessage(QString("Moving to position %1 at velocity %2")
-                       .arg(position)
-                       .arg(velocity));
+  if (m_motionInProgress) {
+    setStatusMessage(QString("Command queued: position %1, velocity %2 - will "
+                             "execute when current motion completes")
+                         .arg(position)
+                         .arg(velocity));
+  } else {
+    setStatusMessage(QString("Moving to position %1 at velocity %2")
+                         .arg(position)
+                         .arg(velocity));
+  }
 }
 
 void EtherCatController::stack_prefault() {
@@ -198,6 +211,30 @@ void EtherCatController::cyclicTask() {
   // Read status
   uint16_t status = EC_READ_U16(domain_pd + status_word_offset);
   int32_t position = EC_READ_S32(domain_pd + actual_pos_offset);
+  bool target_reached = (status & (1 << 10)) != 0;
+
+  // Update motion status when target is reached
+  if (target_reached && m_motionInProgress) {
+    m_motionInProgress = false;
+    emit readyForCommandChanged(true);
+    EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x000F);
+    // Check if there's a pending command to execute immediately
+    if (m_commandPending) {
+      QMetaObject::invokeMethod(
+          this,
+          [this]() {
+            setStatusMessage("Target reached - executing pending command");
+          },
+          Qt::QueuedConnection);
+    } else {
+      QMetaObject::invokeMethod(
+          this,
+          [this]() {
+            setStatusMessage("Target position reached, ready for new command");
+          },
+          Qt::QueuedConnection);
+    }
+  }
 
   // Thread-safe property updates
   QMetaObject::invokeMethod(
@@ -222,22 +259,25 @@ void EtherCatController::cyclicTask() {
       EC_WRITE_U8(domain_pd + op_mode_offset, 1);
     }
 
-    // Handle new position command
-    bool newCommand = m_newCommand.exchange(false);
-    if (newCommand) {
+    if (m_commandPending && !m_motionInProgress) {
       int targetPos, targetVel;
       {
         QMutexLocker locker(&data_mutex);
         targetPos = m_targetPosition;
         targetVel = m_targetVelocity;
       }
+      // Clear the pending flag
+      m_commandPending = false;
 
       EC_WRITE_S32(domain_pd + target_pos_offset, targetPos);
       EC_WRITE_U32(domain_pd + target_vel_offset, targetVel);
 
       // Trigger motion
-      EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x002F);
-      EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x003F);
+      EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x004F);
+      EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x005F);
+
+      // Mark motion as in progress
+      m_motionInProgress = true;
     }
   }
 
