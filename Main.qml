@@ -55,7 +55,9 @@ Window {
             id: velocityInput
             Layout.fillWidth: true
             placeholderText: "Enter velocity"
-            validator: IntValidator { bottom: 1 }
+            validator: IntValidator {
+                bottom: 1
+            }
             enabled: ethercat.connected
         }
 
@@ -64,15 +66,10 @@ Window {
             Layout.columnSpan: 2
             Layout.alignment: Qt.AlignHCenter
             text: "Send Command"
-            enabled: ethercat.connected &&
-                    positionInput.text.length > 0 &&
-                    velocityInput.text.length > 0
+            enabled: ethercat.connected && positionInput.text.length > 0 && velocityInput.text.length > 0
 
             onClicked: {
-                ethercat.moveToPosition(
-                    parseInt(positionInput.text),
-                    parseInt(velocityInput.text)
-                )
+                ethercat.moveToPosition(parseInt(positionInput.text), parseInt(velocityInput.text));
             }
         }
 
@@ -97,7 +94,9 @@ Window {
                     font.pixelSize: 14
                 }
 
-                Item { Layout.fillHeight: true } // Spacer
+                Item {
+                    Layout.fillHeight: true
+                } // Spacer
             }
         }
     }

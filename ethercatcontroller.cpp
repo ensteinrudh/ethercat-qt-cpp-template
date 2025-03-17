@@ -216,8 +216,15 @@ void EtherCatController::cyclicTask() {
   // Update motion status when target is reached
   if (target_reached && m_motionInProgress) {
     m_motionInProgress = false;
+
+    // Explicitly maintain position - ADD THESE LINES
+    EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x000F); // Position hold in CSP
+    EC_WRITE_S32(domain_pd + target_pos_offset,
+                 0);                                // Use current position
+    EC_WRITE_U32(domain_pd + target_vel_offset, 0); // Ensure velocity is zero
+
     emit readyForCommandChanged(true);
-    EC_WRITE_U16(domain_pd + ctrl_word_offset, 0x000F);
+
     // Check if there's a pending command to execute immediately
     if (m_commandPending) {
       QMetaObject::invokeMethod(
